@@ -158,6 +158,7 @@ def main():
             if x2 > x1 and y2 > y1:
                 roi = frame[y1:y2, x1:x2]
                 mean_bgr = cv2.mean(roi)[:3]
+                b_var, g_var, r_var = np.var(roi.reshape(-1, 3), axis=0)
                 b_hist.append(mean_bgr[0])
                 g_hist.append(mean_bgr[1])
                 r_hist.append(mean_bgr[2])
@@ -165,11 +166,21 @@ def main():
                 cv2.rectangle(draw_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
                 cv2.putText(
                     draw_frame,
-                    f"B:{mean_bgr[0]:.1f} G:{mean_bgr[1]:.1f} R:{mean_bgr[2]:.1f}",
-                    (x1, max(24, y1 - 8)),
+                    f"Mean B:{mean_bgr[0]:.1f} G:{mean_bgr[1]:.1f} R:{mean_bgr[2]:.1f}",
+                    (x1, max(40, y1 - 26)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
                     (0, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    draw_frame,
+                    f"Var  B:{b_var:.1f} G:{g_var:.1f} R:{r_var:.1f}",
+                    (x1, max(24, y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 220, 255),
                     2,
                     cv2.LINE_AA,
                 )
