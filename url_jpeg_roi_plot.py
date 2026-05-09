@@ -12,7 +12,8 @@ WINDOW_NAME = "URL JPEG ROI Channel Mean (Press q to quit)"
 FRAME_WIDTH = 960
 FRAME_HEIGHT = 720
 MAX_POINTS = 320
-PLOT_HEIGHT = 180
+PLOT_HEIGHT = 220
+VAR_Y_MAX_BASE = 4000.0
 
 selecting = False
 selection_start: Optional[Tuple[int, int]] = None
@@ -44,7 +45,16 @@ def on_mouse(event, x, y, _flags, _param):
                 roi_rect = (x1, y1, x2, y2)
 
 
-def draw_plot(canvas: np.ndarray, b_values: List[float], g_values: List[float], r_values: List[float]) -> None:
+def draw_plot(
+    canvas: np.ndarray,
+    b_values: List[float],
+    g_values: List[float],
+    r_values: List[float],
+    b_var_values: List[float],
+    g_var_values: List[float],
+    r_var_values: List[float],
+    var_scale: float,
+) -> None:
     h, w, _ = canvas.shape
     margin_left, margin_right, margin_top, margin_bottom = 40, 10, 10, 24
     plot_w = w - margin_left - margin_right
@@ -74,10 +84,25 @@ def draw_plot(canvas: np.ndarray, b_values: List[float], g_values: List[float], 
     cv2.polylines(canvas, [to_points(b_values)], False, (255, 80, 80), 2)
     cv2.polylines(canvas, [to_points(g_values)], False, (80, 255, 80), 2)
     cv2.polylines(canvas, [to_points(r_values)], False, (80, 80, 255), 2)
-    cv2.putText(canvas, "B", (w - 80, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 80, 80), 2, cv2.LINE_AA)
-    cv2.putText(canvas, "G", (w - 55, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (80, 255, 80), 2, cv2.LINE_AA)
-    cv2.putText(canvas, "R", (w - 30, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (80, 80, 255), 2, cv2.LINE_AA)
-    cv2.putText(canvas, f"samples: {n}/{MAX_POINTS}", (margin_left, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1, cv2.LINE_AA)
+
+    var_max = max(1.0, VAR_Y_MAX_BASE * var_scale)
+
+    def to_var_points(values: List[float]) -> np.ndarray:
+        pts = []
+        for i, v in enumerate(values):
+            x = margin_left + int((i / (MAX_POINTS - 1)) * plot_w)
+            y = margin_top + int(plot_h - (min(v, var_max) / var_max) * plot_h)
+            pts.append((x, y))
+        return np.array(pts, dtype=np.int32)
+
+    if len(b_var_values) >= 2:
+        cv2.polylines(canvas, [to_var_points(b_var_values)], False, (180, 50, 50), 1)
+        cv2.polylines(canvas, [to_var_points(g_var_values)], False, (50, 180, 50), 1)
+        cv2.polylines(canvas, [to_var_points(r_var_values)], False, (50, 50, 180), 1)
+
+    cv2.putText(canvas, "Mean B/G/R", (w - 230, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (210, 210, 210), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Var b/g/r", (w - 110, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
+    cv2.putText(canvas, f"samples: {n}/{MAX_POINTS} | var_scale: {var_scale:.2f} | +/- adjust", (margin_left, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1, cv2.LINE_AA)
 
 
 def fetch_jpeg_frame(session: requests.Session, url: str, timeout: float) -> Optional[np.ndarray]:
@@ -105,6 +130,10 @@ def main():
     b_hist: Deque[float] = collections.deque(maxlen=MAX_POINTS)
     g_hist: Deque[float] = collections.deque(maxlen=MAX_POINTS)
     r_hist: Deque[float] = collections.deque(maxlen=MAX_POINTS)
+    b_var_hist: Deque[float] = collections.deque(maxlen=MAX_POINTS)
+    g_var_hist: Deque[float] = collections.deque(maxlen=MAX_POINTS)
+    r_var_hist: Deque[float] = collections.deque(maxlen=MAX_POINTS)
+    var_scale = 1.0
 
     session = requests.Session()
     last_ts = time.time()
@@ -141,12 +170,15 @@ def main():
                 b_hist.append(mean_bgr[0])
                 g_hist.append(mean_bgr[1])
                 r_hist.append(mean_bgr[2])
+                b_var_hist.append(float(b_var))
+                g_var_hist.append(float(g_var))
+                r_var_hist.append(float(r_var))
                 cv2.rectangle(draw_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
                 cv2.putText(draw_frame, f"Mean B:{mean_bgr[0]:.1f} G:{mean_bgr[1]:.1f} R:{mean_bgr[2]:.1f}", (x1, max(40, y1 - 26)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
                 cv2.putText(draw_frame, f"Var  B:{b_var:.1f} G:{g_var:.1f} R:{r_var:.1f}", (x1, max(24, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2, cv2.LINE_AA)
 
         plot_canvas = np.zeros((PLOT_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
-        draw_plot(plot_canvas, list(b_hist), list(g_hist), list(r_hist))
+        draw_plot(plot_canvas, list(b_hist), list(g_hist), list(r_hist), list(b_var_hist), list(g_var_hist), list(r_var_hist), var_scale)
         combined = np.vstack((draw_frame, plot_canvas))
 
         now = time.time()
@@ -166,6 +198,13 @@ def main():
             b_hist.clear()
             g_hist.clear()
             r_hist.clear()
+            b_var_hist.clear()
+            g_var_hist.clear()
+            r_var_hist.clear()
+        if key in (ord("+"), ord("=")):
+            var_scale = min(20.0, var_scale * 1.1)
+        if key in (ord("-"), ord("_")):
+            var_scale = max(0.05, var_scale / 1.1)
 
     session.close()
     cv2.destroyAllWindows()
